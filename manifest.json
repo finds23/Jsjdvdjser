@@ -6,7 +6,7 @@
       "id": "nuvio-serieskao",
       "name": "SeriesKao",
       "description": "Películas y series en español latino desde serieskao.top (~7s)",
-      "version": "1.1.3",
+      "version": "1.1.4",
       "author": "danitvs",
       "supportedTypes": [
         "movie",
