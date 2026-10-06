@@ -32,7 +32,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.1.2"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.1.3"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -621,7 +621,8 @@ function makeStream(label, langLabel, v) {
     name: "SeriesKao",
     title: "SeriesKao - " + label + (v.tag ? " [" + v.tag + "]" : "") + (langLabel ? " (" + langLabel + ")" : ""),
     url: v.url,
-    quality: matchQuality(label),
+    // Nuvio solo muestra name + quality en la lista, asi que el servidor va en quality
+    quality: "\uD83D\uDCFA " + label + (v.tag ? " (" + v.tag + ")" : "") + "\n" + matchQuality(label) + (langLabel ? " | " + langLabel : ""),
     headers: Object.assign({ "User-Agent": UA, "Referer": BASE_URL + "/" }, v.headers || {}),
     provider: "serieskao"
   };
