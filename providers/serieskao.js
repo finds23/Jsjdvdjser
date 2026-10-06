@@ -23,7 +23,7 @@ var LANG_PRIORITY = ["LAT", "ESP", "SUB"];
 var LANG_LABELS = { LAT: "Latino", ESP: "Espa\u00F1ol", SUB: "Subtitulado" };
 
 // Servidores activos. Todo lo demas (vidhide, filemoon, doodstream...) se omite.
-var ENABLED_SOURCES = { voe: true, streamwish: true, vidhide: true }; // vidhide: true SOLO para la prueba comparativa; ponerlo en false despues
+var ENABLED_SOURCES = { voe: true, streamwish: true, vidhide: false }; // vidhide probado en T6E22: responde pero no reproduce
 var SOURCE_LABELS = { voe: "VOE", streamwish: "StreamWish", vidhide: "VidHide" };
 var HOST_HINTS = {
   voe: ["voe.sx", "jennysteady.com"],
@@ -32,7 +32,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.1.3"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.1.4"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
