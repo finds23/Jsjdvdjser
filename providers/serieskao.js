@@ -31,7 +31,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.1.0"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.1.1"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -413,49 +413,65 @@ async function extractVoe(embedUrl, referer) {
     if (!resp.ok) throw new Error("HTTP " + resp.status + " en " + url);
     return { html: await resp.text(), url: resp.url || url };
   }
-  var page = await getHtml(embedUrl, referer || BASE_URL + "/");
-  var jsRedirect = page.html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/i);
-  if (jsRedirect) page = await getHtml(jsRedirect[1], page.url);
-  var origin;
-  try { origin = new URL(page.url).origin; } catch (e) { origin = new URL(embedUrl).origin; }
-
-  // 1) JSON del embed ofuscado con marcadores fijos
-  var sm = page.html.match(/<script type="application\/json"[^>]*>([\s\S]*?)<\/script>/i);
-  if (sm) {
-    try {
-      var arr = JSON.parse(decodeEntities(sm[1].trim()));
-      if (Array.isArray(arr) && arr[0]) {
-        var out = voeResultFromDecoded(decodeVoePayload(arr[0]), origin);
-        if (out.length) return out;
-      }
-    } catch (e) { trace("SERVIDOR", "VOE metodo 1: " + shortErr(e)); }
-  }
-  // 2) metodo anterior: marcadores en script externo
-  var em = page.html.match(/json">\s*\[\s*['"]([^'"]+)['"]\s*\]\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
-  if (em) {
-    try {
-      var loaderUrl = em[2].indexOf("http") === 0 ? em[2] : new URL(em[2], page.url).href;
-      var lr = await fetch(loaderUrl, { headers: { "User-Agent": UA, "Referer": page.url } });
-      if (lr.ok) {
-        var lt = await lr.text();
-        var am = lt.match(/(\[(?:'[^']{1,10}'[\s,]*){4,12}\])/i) || lt.match(/(\[(?:"[^"]{1,10}"[,\s]*){4,12}\])/i);
-        if (am) {
-          var out2 = voeResultFromDecoded(decodeVoePayloadLoader(em[1], am[1]), origin);
-          if (out2.length) return out2;
+  // Busca el video en una pagina de VOE con los tres metodos conocidos
+  async function tryPage(page) {
+    var origin;
+    try { origin = new URL(page.url).origin; } catch (e) { origin = new URL(embedUrl).origin; }
+    // 1) JSON del embed ofuscado con marcadores fijos
+    var sm = page.html.match(/<script type="application\/json"[^>]*>([\s\S]*?)<\/script>/i);
+    if (sm) {
+      try {
+        var arr = JSON.parse(decodeEntities(sm[1].trim()));
+        if (Array.isArray(arr) && arr[0]) {
+          var out = voeResultFromDecoded(decodeVoePayload(arr[0]), origin);
+          if (out.length) return out;
         }
-      }
-    } catch (e) { trace("SERVIDOR", "VOE metodo 2: " + shortErr(e)); }
+      } catch (e) { trace("SERVIDOR", "VOE metodo 1: " + shortErr(e)); }
+    }
+    // 2) metodo anterior: marcadores en script externo
+    var em = page.html.match(/json">\s*\[\s*['"]([^'"]+)['"]\s*\]\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
+    if (em) {
+      try {
+        var loaderUrl = em[2].indexOf("http") === 0 ? em[2] : new URL(em[2], page.url).href;
+        var lr = await fetch(loaderUrl, { headers: { "User-Agent": UA, "Referer": page.url } });
+        if (lr.ok) {
+          var lt = await lr.text();
+          var am = lt.match(/(\[(?:'[^']{1,10}'[\s,]*){4,12}\])/i) || lt.match(/(\[(?:"[^"]{1,10}"[,\s]*){4,12}\])/i);
+          if (am) {
+            var out2 = voeResultFromDecoded(decodeVoePayloadLoader(em[1], am[1]), origin);
+            if (out2.length) return out2;
+          }
+        }
+      } catch (e) { trace("SERVIDOR", "VOE metodo 2: " + shortErr(e)); }
+    }
+    // 3) enlaces en claro
+    var sourceRegex = /(?:mp4|hls)'\s*:\s*'([^']+)'/gi;
+    var sourceMatch;
+    while ((sourceMatch = sourceRegex.exec(page.html)) !== null) {
+      var link = sourceMatch[1];
+      if (link.indexOf("aHR0") === 0) { try { link = atob(link); } catch (e) { /* seguir */ } }
+      if (link) return [{ url: link, headers: { "Referer": origin + "/", "User-Agent": UA } }];
+    }
+    return null;
   }
-  // 3) enlaces en claro
-  var sourceRegex = /(?:mp4|hls)'\s*:\s*'([^']+)'/gi;
-  var sourceMatch;
-  while ((sourceMatch = sourceRegex.exec(page.html)) !== null) {
-    var link = sourceMatch[1];
-    if (link.indexOf("aHR0") === 0) { try { link = atob(link); } catch (e) { /* seguir */ } }
-    if (link) return [{ url: link, headers: { "Referer": origin + "/", "User-Agent": UA } }];
+
+  // Primero la pagina original (puede traer el video sin pasar por la redireccion)
+  var first = await getHtml(embedUrl, referer || BASE_URL + "/");
+  var found = await tryPage(first);
+  if (found) return found;
+  var last = first;
+  var jsRedirect = first.html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/i);
+  if (jsRedirect) {
+    trace("SERVIDOR", "VOE " + hostOf(first.url) + " redirige a " + hostOf(jsRedirect[1]));
+    last = await getHtml(jsRedirect[1], first.url);
+    found = await tryPage(last);
+    if (found) return found;
   }
-  trace("SERVIDOR", "VOE " + hostOf(page.url) + ": " + describeHtml(page.html));
-  throw new Error("VOE: no se encontro el video (json=" + (sm ? "si" : "no") + ")");
+  trace("SERVIDOR", "VOE " + hostOf(last.url) + ": " + describeHtml(last.html));
+  if (/confirm you.{1,6}re human|captcha|turnstile/i.test(decodeEntities(last.html))) {
+    throw new Error("VOE: pide verificacion humana (anti-bot) en " + hostOf(last.url));
+  }
+  throw new Error("VOE: no se encontro el video");
 }
 
 // ---------- extractor StreamWish (portado de AnimeJara) ----------
@@ -482,7 +498,7 @@ function describeHtml(html) {
     ", m3u8=" + (/m3u8/.test(html) ? "si" : "no") +
     ", sources=" + (/sources\s*:/.test(html) ? "si" : "no") +
     (looksBlocked(html) ? ", CLOUDFLARE" : "") +
-    ", titulo=" + (t ? t[1].trim().slice(0, 30) : "?");
+    ", titulo=" + (t ? decodeEntities(t[1].trim()).slice(0, 30) : "?");
 }
 function extractHlsFromHtml(html) {
   var texts = [html];
@@ -566,6 +582,30 @@ async function extractBySource(source, url, referer) {
   return await extractStreamWish(url, referer);
 }
 
+// Diagnostico: pide el enlace final con sus headers para ver si responde (HTTP, #EXTM3U)
+async function probeStream(label, v) {
+  if (!DEBUG || !v || !v.url) return;
+  try {
+    var h = Object.assign({ "User-Agent": UA, "Referer": BASE_URL + "/" }, v.headers || {}, { "Range": "bytes=0-400" });
+    var r = await fetch(v.url, { headers: h });
+    var ctype = "";
+    try { ctype = (r.headers && r.headers.get && r.headers.get("content-type")) || ""; } catch (e) { /* sin headers */ }
+    var isM3u8 = /m3u8/i.test(v.url) || /mpegurl/i.test(ctype);
+    var detail = ctype.split(";")[0] || "?";
+    var bad = !r.ok;
+    if (isM3u8) {
+      var body = "";
+      try { body = (await r.text()).slice(0, 80); } catch (e) { /* sin cuerpo */ }
+      if (r.ok && body.indexOf("#EXTM3U") === 0) detail = "#EXTM3U ok";
+      else { detail = "cuerpo: " + body.replace(/\s+/g, " ").slice(0, 50); bad = true; }
+    }
+    (bad ? fail : ok)("SERVIDOR", label + " prueba " + hostOf(v.url) + ": HTTP " + r.status + ", " + detail);
+    trace("SERVIDOR", "url " + String(v.url).slice(0, 140));
+  } catch (e) {
+    fail("SERVIDOR", label + " prueba " + hostOf(v.url) + ": " + shortErr(e));
+  }
+}
+
 function makeStream(label, langLabel, v) {
   var o = {
     name: "SeriesKao",
@@ -622,6 +662,7 @@ async function resolveVidUrlPage(vidUrl) {
       var label = SOURCE_LABELS[source];
       try {
         var list = await extractBySource(source, decrypted, BASE_URL + "/");
+        await probeStream(label, list[0]);
         var out = [];
         list.forEach(function (v) {
           if (!v || !v.url || seen[v.url]) return;
@@ -655,6 +696,7 @@ async function resolveServer(server) {
   var label = SOURCE_LABELS[source];
   try {
     var list = await extractBySource(source, url, BASE_URL + "/");
+    await probeStream(label, list[0]);
     ok("SERVIDOR", label + ": " + list.length + " enlace(s)");
     return list.map(function (v) { return makeStream(label, "", v); });
   } catch (e) {
