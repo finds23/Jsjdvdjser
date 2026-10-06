@@ -23,15 +23,16 @@ var LANG_PRIORITY = ["LAT", "ESP", "SUB"];
 var LANG_LABELS = { LAT: "Latino", ESP: "Espa\u00F1ol", SUB: "Subtitulado" };
 
 // Servidores activos. Todo lo demas (vidhide, filemoon, doodstream...) se omite.
-var ENABLED_SOURCES = { voe: true, streamwish: true };
-var SOURCE_LABELS = { voe: "VOE", streamwish: "StreamWish" };
+var ENABLED_SOURCES = { voe: true, streamwish: true, vidhide: true }; // vidhide: true SOLO para la prueba comparativa; ponerlo en false despues
+var SOURCE_LABELS = { voe: "VOE", streamwish: "StreamWish", vidhide: "VidHide" };
 var HOST_HINTS = {
   voe: ["voe.sx", "jennysteady.com"],
-  streamwish: ["streamwish", "wishembed", "hglink.to", "filelions", "hlswish", "vibuxer", "awish"]
+  streamwish: ["streamwish", "wishembed", "hglink.to", "filelions", "hlswish", "vibuxer", "awish"],
+  vidhide: ["vidhide", "dintezuvio.com", "minochinos.com"]
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.1.1"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.1.2"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -515,9 +516,10 @@ function extractHlsFromHtml(html) {
     if (lm) {
       try {
         var links = JSON.parse(lm[1]);
-        var best = links.hls4 || links.hls2 || links.hls3 || links.hls1 || links.hls;
-        if (!best) Object.keys(links).forEach(function (k) { if (!best && /\.m3u8/.test(String(links[k]))) best = links[k]; });
-        if (best) return best;
+        var bestKey = ["hls4", "hls2", "hls3", "hls1", "hls"].filter(function (k) { return links[k]; })[0];
+        var best = bestKey ? links[bestKey] : null;
+        if (!best) Object.keys(links).forEach(function (k) { if (!best && /\.m3u8/.test(String(links[k]))) { best = links[k]; bestKey = k; } });
+        if (best) { trace("SERVIDOR", "enlaces: " + Object.keys(links).join(",") + " -> uso " + bestKey); return best; }
       } catch (e) { /* seguir */ }
     }
     var jm = /["']hls\d?["']\s*:\s*["']([^"']+)["']/.exec(texts[i]);
@@ -579,6 +581,14 @@ async function extractStreamWish(embedUrl, referer) {
 
 async function extractBySource(source, url, referer) {
   if (source === "voe") return await extractVoe(url, referer);
+  if (source === "vidhide") {
+    try {
+      return await extractStreamWish(url, referer);
+    } catch (e) {
+      if (/\/v\//.test(url)) return await extractStreamWish(url.replace("/v/", "/e/"), referer);
+      throw e;
+    }
+  }
   return await extractStreamWish(url, referer);
 }
 
