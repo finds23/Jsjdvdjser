@@ -33,7 +33,7 @@ var HOST_HINTS = {
 
 // ---------- diagnostico ----------
 var VERSION = "1.1.4"; // se muestra en el diagnostico para saber que copia carga Nuvio
-var DEBUG = true;
+var DEBUG = false;
 var TRACE = [];
 var FAIL = null;
 var SKIPPED = [];
