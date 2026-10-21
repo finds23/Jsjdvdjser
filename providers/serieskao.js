@@ -32,7 +32,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.1.6-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.1.7-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -501,7 +501,7 @@ function describeHtml(html) {
     (looksBlocked(html) ? ", CLOUDFLARE" : "") +
     ", titulo=" + (t ? decodeEntities(t[1].trim()).slice(0, 30) : "?");
 }
-function extractHlsFromHtml(html) {
+function extractHlsFromHtml(html, outAll) {
   var texts = [html];
   var re = /eval\(function\(p,a,c,k,e,d\)[\s\S]*?\.split\(\s*['"]\|['"]\s*\)[^\n]*?\)\)/g, m;
   while ((m = re.exec(html)) !== null) {
@@ -519,6 +519,7 @@ function extractHlsFromHtml(html) {
         var bestKey = ["hls4", "hls2", "hls3", "hls1", "hls"].filter(function (k) { return links[k]; })[0];
         var best = bestKey ? links[bestKey] : null;
         if (!best) Object.keys(links).forEach(function (k) { if (!best && /\.m3u8/.test(String(links[k]))) { best = links[k]; bestKey = k; } });
+        if (outAll) ["hls4", "hls2", "hls3", "hls1", "hls"].forEach(function (k) { if (links[k]) outAll.push({ key: k, url: links[k] }); });
         if (best) { trace("SERVIDOR", "enlaces: " + Object.keys(links).join(",") + " -> uso " + bestKey); return best; }
       } catch (e) { /* seguir */ }
     }
@@ -553,12 +554,13 @@ async function extractStreamWish(embedUrl, referer) {
   referer = referer || BASE_URL + "/";
   var pageUrl = embedUrl.replace("hglink.to", "vibuxer.com");
   var html = "", url = null;
+  var allLinks = [];
   for (var hop = 0; hop < 4; hop++) {
     var resp = await fetch(pageUrl, { headers: { "User-Agent": UA, "Referer": referer, "Accept": "text/html,application/xhtml+xml" } });
     if (!resp.ok) throw new Error("HTTP " + resp.status + " en " + pageUrl);
     html = await resp.text();
     pageUrl = resp.url || pageUrl;
-    url = extractHlsFromHtml(html);
+    url = extractHlsFromHtml(html, allLinks);
     if (url) break;
     var next = findJsRedirect(html, pageUrl);
     if (!next || next === pageUrl) break;
@@ -573,10 +575,18 @@ async function extractStreamWish(embedUrl, referer) {
     if (html.length < 3000) trace("SERVIDOR", "cuerpo: " + html.replace(/\s+/g, " ").slice(0, 130));
     throw new Error("StreamWish: no se encontro la URL HLS en " + hostOf(pageUrl));
   }
-  url = String(url).replace(/\\\//g, "/");
-  if (url.indexOf("//") === 0) url = "https:" + url;
-  else if (url.charAt(0) === "/") url = origin + url;
-  return [{ url: url, type: "hls", headers: { "Referer": origin + "/", "Origin": origin, "User-Agent": UA } }];
+  function fixUrl(u) {
+    u = String(u).replace(/\\\//g, "/");
+    if (u.indexOf("//") === 0) u = "https:" + u;
+    else if (u.charAt(0) === "/") u = origin + u;
+    return u;
+  }
+  var hdrs = { "Referer": origin + "/", "Origin": origin, "User-Agent": UA };
+  // Varias calidades/servidores (hls4, hls2, hls3...): cada una como tarjeta aparte para probar cual reproduce
+  if (allLinks.length > 1) {
+    return allLinks.map(function (l) { return { url: fixUrl(l.url), type: "hls", tag: l.key, headers: hdrs }; });
+  }
+  return [{ url: fixUrl(url), type: "hls", headers: hdrs }];
 }
 
 async function extractBySource(source, url, referer) {
