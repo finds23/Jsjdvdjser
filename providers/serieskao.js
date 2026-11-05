@@ -33,7 +33,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.2.0-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.2.1-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -592,31 +592,52 @@ async function extractStreamWish(embedUrl, referer) {
 
 // ---------- extractor Uqload (mp4 directo; requiere Referer del embed) ----------
 async function extractUqload(embedUrl, referer) {
-  var u = new URL(embedUrl);
-  // /abc123 o /embed-abc123.html -> siempre pedir la forma embed-<id>.html
-  var idm = u.pathname.match(/(?:embed-)?([a-z0-9]{8,16})(?:\.html)?\/?$/i);
-  var pageUrl = idm ? u.origin + "/embed-" + idm[1] + ".html" : embedUrl;
-  var resp = await fetch(pageUrl, { headers: { "User-Agent": UA, "Referer": referer || BASE_URL + "/" } });
-  if (!resp.ok) throw new Error("HTTP " + resp.status + " en " + pageUrl);
-  var html = await resp.text();
-  pageUrl = resp.url || pageUrl;
-  var origin;
-  try { origin = new URL(pageUrl).origin; } catch (e) { origin = u.origin; }
-  if (/file was deleted|file not found|no longer available/i.test(html)) throw new Error("Uqload: el archivo fue eliminado");
-  var texts = [html];
-  var pm = /eval\(function\(p,a,c,k,e,d\)[\s\S]*?\.split\(\s*['"]\|['"]\s*\)[^\n]*?\)\)/.exec(html);
-  if (pm) { try { var up = unpackPacker(pm[0]); if (up) texts.unshift(up); } catch (e) { /* seguir */ } }
-  var found = null;
-  for (var i = 0; i < texts.length && !found; i++) {
-    var m = /sources\s*:\s*\[\s*["']([^"']+)["']/.exec(texts[i]) ||
-            /file\s*:\s*["'](https?:[^"']+\.(?:mp4|m3u8)[^"']*)["']/i.exec(texts[i]) ||
-            /["'](https?:\/\/[^"'\s\\]+\.(?:mp4|m3u8)[^"'\s\\]*)["']/i.exec(texts[i]);
-    if (m) found = m[1].replace(/\\\//g, "/");
+  var pageUrl = embedUrl;
+  var ref = referer || BASE_URL + "/";
+  var html = "", found = null;
+  // embed69.org/uqlink.php?id=... es una pagina intermedia pequena: se siguen hasta 4 saltos
+  for (var hop = 0; hop < 4 && !found; hop++) {
+    var u0;
+    try { u0 = new URL(pageUrl); } catch (e) { break; }
+    var idm = /uqload/i.test(u0.host) ? u0.pathname.match(/^\/(?:embed-)?([a-z0-9]{8,16})(?:\.html)?\/?$/i) : null;
+    if (idm) pageUrl = u0.origin + "/embed-" + idm[1] + ".html";
+    var resp = await fetch(pageUrl, { headers: { "User-Agent": UA, "Referer": ref } });
+    if (!resp.ok) throw new Error("HTTP " + resp.status + " en " + pageUrl);
+    html = await resp.text();
+    pageUrl = resp.url || pageUrl;
+    if (/file was deleted|file not found|no longer available/i.test(html)) throw new Error("Uqload: el archivo fue eliminado");
+    var texts = [html];
+    var pm = /eval\(function\(p,a,c,k,e,d\)[\s\S]*?\.split\(\s*['"]\|['"]\s*\)[^\n]*?\)\)/.exec(html);
+    if (pm) { try { var up = unpackPacker(pm[0]); if (up) texts.unshift(up); } catch (e) { /* seguir */ } }
+    for (var i = 0; i < texts.length && !found; i++) {
+      var m = /sources\s*:\s*\[\s*["']([^"']+)["']/.exec(texts[i]) ||
+              /file\s*:\s*["'](https?:[^"']+\.(?:mp4|m3u8)[^"']*)["']/i.exec(texts[i]) ||
+              /["'](https?:\/\/[^"'\s\\]+\.(?:mp4|m3u8)[^"'\s\\]*)["']/i.exec(texts[i]);
+      if (m) found = m[1].replace(/\\\//g, "/");
+    }
+    if (found) break;
+    var next = findJsRedirect(html, pageUrl);
+    if (!next) {
+      // enlace a uqload escrito en claro o en base64
+      var um = /https?:\/\/(?:www\.)?uqload\.[a-z]+\/[^"'\s\\<]+/i.exec(html);
+      if (um) next = um[0];
+      else {
+        var bm = /["']([A-Za-z0-9+\/=]{24,})["']/.exec(html);
+        if (bm) { try { var dec = atob(bm[1]); if (/^https?:\/\//.test(dec)) next = dec; } catch (e) { /* no era base64 */ } }
+      }
+    }
+    if (!next || next === pageUrl) break;
+    trace("SERVIDOR", "Uqload " + hostOf(pageUrl) + " -> " + hostOf(next));
+    ref = pageUrl;
+    pageUrl = next;
   }
   if (!found) {
     trace("SERVIDOR", "Uqload " + hostOf(pageUrl) + ": " + describeHtml(html));
+    if (html.length < 3000) trace("SERVIDOR", "cuerpo: " + html.replace(/\s+/g, " ").slice(0, 130));
     throw new Error("Uqload: no se encontro el video en " + hostOf(pageUrl));
   }
+  var origin;
+  try { origin = new URL(pageUrl).origin; } catch (e) { origin = new URL(embedUrl).origin; }
   if (found.indexOf("//") === 0) found = "https:" + found;
   var res = { url: found, headers: { "Referer": origin + "/", "Origin": origin, "User-Agent": UA } };
   if (/\.m3u8/i.test(found)) res.type = "hls";
