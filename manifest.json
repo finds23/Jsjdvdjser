@@ -1,12 +1,12 @@
 {
   "name": "danitvs",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "scrapers": [
     {
       "id": "nuvio-serieskao",
       "name": "SeriesKao",
       "description": "Películas y series en español latino desde serieskao.top (~7s)",
-      "version": "1.1.9",
+      "version": "2.0",
       "author": "danitvs",
       "supportedTypes": [
         "movie",
