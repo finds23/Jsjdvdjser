@@ -33,7 +33,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.2.1-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.2.2-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -601,10 +601,24 @@ async function extractUqload(embedUrl, referer) {
     try { u0 = new URL(pageUrl); } catch (e) { break; }
     var idm = /uqload/i.test(u0.host) ? u0.pathname.match(/^\/(?:embed-)?([a-z0-9]{8,16})(?:\.html)?\/?$/i) : null;
     if (idm) pageUrl = u0.origin + "/embed-" + idm[1] + ".html";
-    var resp = await fetch(pageUrl, { headers: { "User-Agent": UA, "Referer": ref } });
+    // uqload responde "Video embed restricted for this domain" segun el Referer: se prueban varios
+    var refs = [ref, BASE_URL + "/", "https://embed69.org/", null, "https://uqload.vc/"];
+    var resp = null, tried = [];
+    for (var ri = 0; ri < refs.length; ri++) {
+      if (tried.indexOf(refs[ri]) !== -1) continue;
+      tried.push(refs[ri]);
+      var hd = { "User-Agent": UA };
+      if (refs[ri]) hd["Referer"] = refs[ri];
+      var r2 = await fetch(pageUrl, { headers: hd });
+      if (!r2.ok) { if (!resp) resp = r2; continue; }
+      var t2 = await r2.text();
+      resp = r2; html = t2;
+      if (!/restricted for this domain/i.test(t2)) { if (ri > 0) trace("SERVIDOR", "Uqload: Referer que funciono = " + (refs[ri] || "ninguno")); break; }
+    }
+    if (!resp) throw new Error("sin respuesta en " + pageUrl);
     if (!resp.ok) throw new Error("HTTP " + resp.status + " en " + pageUrl);
-    html = await resp.text();
     pageUrl = resp.url || pageUrl;
+    if (/restricted for this domain/i.test(html)) trace("SERVIDOR", "Uqload: restringido con Referer " + tried.map(function (x) { return x ? hostOf(x) : "ninguno"; }).join(", ") + " | url " + pageUrl.slice(0, 90));
     if (/file was deleted|file not found|no longer available/i.test(html)) throw new Error("Uqload: el archivo fue eliminado");
     var texts = [html];
     var pm = /eval\(function\(p,a,c,k,e,d\)[\s\S]*?\.split\(\s*['"]\|['"]\s*\)[^\n]*?\)\)/.exec(html);
