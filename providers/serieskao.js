@@ -33,7 +33,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.2.2-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.2.4-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -601,24 +601,43 @@ async function extractUqload(embedUrl, referer) {
     try { u0 = new URL(pageUrl); } catch (e) { break; }
     var idm = /uqload/i.test(u0.host) ? u0.pathname.match(/^\/(?:embed-)?([a-z0-9]{8,16})(?:\.html)?\/?$/i) : null;
     if (idm) pageUrl = u0.origin + "/embed-" + idm[1] + ".html";
-    // uqload responde "Video embed restricted for this domain" segun el Referer: se prueban varios
-    var refs = [ref, BASE_URL + "/", "https://embed69.org/", null, "https://uqload.vc/"];
-    var resp = null, tried = [];
-    for (var ri = 0; ri < refs.length; ri++) {
-      if (tried.indexOf(refs[ri]) !== -1) continue;
-      tried.push(refs[ri]);
-      var hd = { "User-Agent": UA };
-      if (refs[ri]) hd["Referer"] = refs[ri];
-      var r2 = await fetch(pageUrl, { headers: hd });
-      if (!r2.ok) { if (!resp) resp = r2; continue; }
-      var t2 = await r2.text();
-      resp = r2; html = t2;
-      if (!/restricted for this domain/i.test(t2)) { if (ri > 0) trace("SERVIDOR", "Uqload: Referer que funciono = " + (refs[ri] || "ninguno")); break; }
+    // uqload responde "Video embed restricted for this domain" segun Referer/dominio: se prueban varias combinaciones
+    var refs = [ref, BASE_URL + "/", "https://embed69.org/", null];
+    var urls = [pageUrl];
+    var uh = null;
+    try { uh = new URL(pageUrl); } catch (e) { /* sin url */ }
+    if (uh && /uqload/i.test(uh.host)) {
+      ["uqload.io", "uqload.cx", "uqload.is", "uqload.to", "uqload.ws", "uqload.com", "uqload.net"].forEach(function (d) {
+        if (uh.host.indexOf(d) === -1) urls.push(pageUrl.replace(uh.host, d));
+      });
     }
+    var resp = null, tried = [], okHost = null;
+    var MOBILE_UA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+    for (var ui = 0; ui < urls.length && !okHost; ui++) {
+      // dominio principal: UA movil (como Brave) sin Referer primero; dominios alternos: solo esa prueba
+      var combos = ui === 0
+        ? [[MOBILE_UA, null], [MOBILE_UA, refs[0]], [MOBILE_UA, BASE_URL + "/"], [UA, null], [UA, BASE_URL + "/"]]
+        : [[MOBILE_UA, null]];
+      for (var ci = 0; ci < combos.length; ci++) {
+        var hd = { "User-Agent": combos[ci][0], "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "es-MX,es;q=0.9,en;q=0.8" };
+        if (combos[ci][1]) hd["Referer"] = combos[ci][1];
+        var r2;
+        try { r2 = await fetch(urls[ui], { headers: hd }); } catch (e) { break; }
+        if (!r2.ok) { if (!resp) resp = r2; break; }
+        var t2 = await r2.text();
+        resp = r2; html = t2;
+        if (!/restricted for this domain/i.test(t2)) {
+          okHost = urls[ui];
+          trace("SERVIDOR", "Uqload: funciono " + hostOf(urls[ui]) + " con " + (combos[ci][0] === MOBILE_UA ? "UA movil" : "UA PC") + ", Referer " + (combos[ci][1] ? hostOf(combos[ci][1]) : "ninguno"));
+          break;
+        }
+      }
+      tried.push(hostOf(urls[ui]));
+    }
+    if (okHost) pageUrl = resp.url || okHost;
     if (!resp) throw new Error("sin respuesta en " + pageUrl);
     if (!resp.ok) throw new Error("HTTP " + resp.status + " en " + pageUrl);
-    pageUrl = resp.url || pageUrl;
-    if (/restricted for this domain/i.test(html)) trace("SERVIDOR", "Uqload: restringido con Referer " + tried.map(function (x) { return x ? hostOf(x) : "ninguno"; }).join(", ") + " | url " + pageUrl.slice(0, 90));
+    if (!okHost) { pageUrl = resp.url || pageUrl; if (/restricted for this domain/i.test(html)) trace("SERVIDOR", "Uqload: restringido en " + tried.join(", ") + " | " + pageUrl.slice(0, 80)); }
     if (/file was deleted|file not found|no longer available/i.test(html)) throw new Error("Uqload: el archivo fue eliminado");
     var texts = [html];
     var pm = /eval\(function\(p,a,c,k,e,d\)[\s\S]*?\.split\(\s*['"]\|['"]\s*\)[^\n]*?\)\)/.exec(html);
