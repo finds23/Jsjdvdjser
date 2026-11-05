@@ -1,6 +1,6 @@
 /**
  * SeriesKao (serieskao.top) - plugin para Nuvio
- * Servidores soportados: VOE y StreamWish (VidHide descartado: no funciona).
+ * Servidores soportados: VOE, StreamWish, VidHide y Uqload.
  * Flujo A: TMDB -> IMDB -> /vidurl/<imdb>[-SxEE]/ (dataLink cifrado + POW) -> embeds
  * Flujo B: TMDB -> busqueda en el sitio -> pagina del episodio -> botones de servidor -> embeds
  *
@@ -23,16 +23,17 @@ var LANG_PRIORITY = ["LAT", "ESP", "SUB"];
 var LANG_LABELS = { LAT: "Latino", ESP: "Espa\u00F1ol", SUB: "Subtitulado" };
 
 // Servidores activos. Todo lo demas (vidhide, filemoon, doodstream...) se omite.
-var ENABLED_SOURCES = { voe: true, streamwish: true, vidhide: true }; // reactivado a pedido; antes (T6E22) respondia pero no reproducia
-var SOURCE_LABELS = { voe: "VOE", streamwish: "StreamWish", vidhide: "VidHide" };
+var ENABLED_SOURCES = { voe: true, streamwish: true, vidhide: true, uqload: true }; // reactivado a pedido; antes (T6E22) respondia pero no reproducia
+var SOURCE_LABELS = { voe: "VOE", streamwish: "StreamWish", vidhide: "VidHide", uqload: "Uqload" };
 var HOST_HINTS = {
+  uqload: ["uqload"],
   voe: ["voe.sx", "jennysteady.com"],
   streamwish: ["streamwish", "wishembed", "hglink.to", "filelions", "hlswish", "vibuxer", "awish"],
   vidhide: ["vidhide", "dintezuvio.com", "minochinos.com"]
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.1.7-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.2.0-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -589,7 +590,41 @@ async function extractStreamWish(embedUrl, referer) {
   return [{ url: fixUrl(url), type: "hls", headers: hdrs }];
 }
 
+// ---------- extractor Uqload (mp4 directo; requiere Referer del embed) ----------
+async function extractUqload(embedUrl, referer) {
+  var u = new URL(embedUrl);
+  // /abc123 o /embed-abc123.html -> siempre pedir la forma embed-<id>.html
+  var idm = u.pathname.match(/(?:embed-)?([a-z0-9]{8,16})(?:\.html)?\/?$/i);
+  var pageUrl = idm ? u.origin + "/embed-" + idm[1] + ".html" : embedUrl;
+  var resp = await fetch(pageUrl, { headers: { "User-Agent": UA, "Referer": referer || BASE_URL + "/" } });
+  if (!resp.ok) throw new Error("HTTP " + resp.status + " en " + pageUrl);
+  var html = await resp.text();
+  pageUrl = resp.url || pageUrl;
+  var origin;
+  try { origin = new URL(pageUrl).origin; } catch (e) { origin = u.origin; }
+  if (/file was deleted|file not found|no longer available/i.test(html)) throw new Error("Uqload: el archivo fue eliminado");
+  var texts = [html];
+  var pm = /eval\(function\(p,a,c,k,e,d\)[\s\S]*?\.split\(\s*['"]\|['"]\s*\)[^\n]*?\)\)/.exec(html);
+  if (pm) { try { var up = unpackPacker(pm[0]); if (up) texts.unshift(up); } catch (e) { /* seguir */ } }
+  var found = null;
+  for (var i = 0; i < texts.length && !found; i++) {
+    var m = /sources\s*:\s*\[\s*["']([^"']+)["']/.exec(texts[i]) ||
+            /file\s*:\s*["'](https?:[^"']+\.(?:mp4|m3u8)[^"']*)["']/i.exec(texts[i]) ||
+            /["'](https?:\/\/[^"'\s\\]+\.(?:mp4|m3u8)[^"'\s\\]*)["']/i.exec(texts[i]);
+    if (m) found = m[1].replace(/\\\//g, "/");
+  }
+  if (!found) {
+    trace("SERVIDOR", "Uqload " + hostOf(pageUrl) + ": " + describeHtml(html));
+    throw new Error("Uqload: no se encontro el video en " + hostOf(pageUrl));
+  }
+  if (found.indexOf("//") === 0) found = "https:" + found;
+  var res = { url: found, headers: { "Referer": origin + "/", "Origin": origin, "User-Agent": UA } };
+  if (/\.m3u8/i.test(found)) res.type = "hls";
+  return [res];
+}
+
 async function extractBySource(source, url, referer) {
+  if (source === "uqload") return await extractUqload(url, referer);
   if (source === "voe") return await extractVoe(url, referer);
   if (source === "vidhide") {
     try {
