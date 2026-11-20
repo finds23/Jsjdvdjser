@@ -33,7 +33,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.2.5-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.2.6-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -740,6 +740,36 @@ function makeStream(label, langLabel, v) {
   return o;
 }
 
+// ---------- DEBUG: volcar como se obtiene la clave ahora ----------
+async function dumpKeyDebug(html, vidUrl) {
+  try {
+    var clean = html.replace(/(?:let|var)\s+dataLink\s*=\s*\[.+\];/, "dataLink=[...];").replace(/[A-Za-z0-9+\/=]{120,}/g, "<B64>");
+    function windows(text, tag, max) {
+      var re = /decrypt|importKey|subtle|AES|deriveKey|PBKDF|sha256|nonce|challenge|aesKey|secret|token|fetch\(|XMLHttpRequest/gi, m, last = -1, n = 0;
+      while ((m = re.exec(text)) && n < max) {
+        if (m.index > last) {
+          trace("DBG " + tag, text.slice(Math.max(0, m.index - 60), m.index + 140).replace(/\s+/g, " "));
+          last = m.index + 140; n++;
+        }
+      }
+      if (n === 0) trace("DBG " + tag, "sin coincidencias (" + text.length + "b)");
+    }
+    var srcs = [], re2 = /<script[^>]+src=["']([^"']+)["']/gi, mm;
+    while ((mm = re2.exec(html))) srcs.push(mm[1]);
+    trace("DBG", "html " + html.length + "b | scripts: " + srcs.join(" , "));
+    windows(clean, "inline", 6);
+    for (var i = 0; i < srcs.length; i++) {
+      var u = srcs[i];
+      if (/jquery|bootstrap|crypto-js|cryptojs|cdnjs/i.test(u)) continue;
+      if (u.indexOf("//") === 0) u = "https:" + u; else if (u.charAt(0) === "/") u = BASE_URL + u;
+      try {
+        var js = await fetchText(u, { Referer: vidUrl });
+        windows(js, "js" + i, 4);
+      } catch (e) { trace("DBG js" + i, "no se pudo leer " + u); }
+    }
+  } catch (e) { trace("DBG", "error " + e); }
+}
+
 // ---------- paso EPISODIO/SERVIDOR via /vidurl/ ----------
 async function resolveVidUrlPage(vidUrl) {
   var html;
@@ -756,6 +786,7 @@ async function resolveVidUrlPage(vidUrl) {
   }
   var aesKey = solvePowAndGetKey(html);
   if (!aesKey) {
+    await dumpKeyDebug(html, vidUrl);
     fail("EPISODIO", "vidurl: no se resolvio el POW / clave AES");
     return [];
   }
