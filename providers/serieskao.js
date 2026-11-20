@@ -33,7 +33,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.2.7-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.2.8-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -340,6 +340,12 @@ function decryptEmbedLink(encryptedBase64, aesKey) {
 }
 
 function solvePowAndGetKey(html) {
+  // Metodo nuevo: clave = SHA-256(LINK_CHALLENGE + LINK_SALT). El desafio cambia en cada carga.
+  var c = html.match(/LINK_CHALLENGE\s*=\s*["']([^"']+)["']/);
+  var sl = html.match(/LINK_SALT\s*=\s*["']([^"']+)["']/);
+  if (c && sl) return CryptoJS.SHA256(c[1] + sl[1]);
+
+  // Metodo anterior (POW), por si el sitio vuelve a el
   function grab(name, isNum) {
     var re = isNum
       ? new RegExp(name + "\\s*[=:]\\s*[\"']?(\\d+)")
@@ -350,18 +356,12 @@ function solvePowAndGetKey(html) {
   var challenge = grab("POW_CHALLENGE");
   var difficulty = grab("POW_DIFFICULTY", true);
   var salt = grab("POW_SALT");
-  if (!challenge || !difficulty || !salt) {
-    var idx = html.indexOf("POW");
-    trace("DEBUG", "POW vars: c=" + !!challenge + " d=" + difficulty + " s=" + !!salt +
-      " | " + (idx >= 0 ? html.substr(idx, 150).replace(/\s+/g, " ") : "no hay 'POW' en el html"));
-    return null;
-  }
+  if (!challenge || !difficulty || !salt) return null;
   var prefix = "0".repeat(parseInt(difficulty, 10));
-  for (var nonce = 0; nonce < 3000000; nonce++) { // tope para no colgar el plugin
+  for (var nonce = 0; nonce < 3000000; nonce++) {
     var hash = CryptoJS.SHA256(challenge + nonce).toString(CryptoJS.enc.Hex);
     if (hash.startsWith(prefix)) return CryptoJS.SHA256(challenge + nonce + salt);
   }
-  trace("DEBUG", "POW sin solucion en 3M intentos, dificultad=" + difficulty);
   return null;
 }
 
