@@ -33,7 +33,7 @@ var HOST_HINTS = {
 };
 
 // ---------- diagnostico ----------
-var VERSION = "1.2.8-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
+var VERSION = "1.2.9-debug"; // se muestra en el diagnostico para saber que copia carga Nuvio
 var DEBUG = true;
 var TRACE = [];
 var FAIL = null;
@@ -69,8 +69,21 @@ function diagnostic(count) {
     headers: {}
   }];
 }
+// hls4 primero (hls1/hls3 suelen venir sin enlace); el resto conserva su orden
+function hlsFirst(streams) {
+  var rank = { "hls4": 0, "hls2": 1, "hls3": 2, "hls1": 3 };
+  function r(s) {
+    var m = /\((hls\d)\)/i.exec(String((s && s.quality) || ""));
+    return m && rank[m[1].toLowerCase()] !== undefined ? rank[m[1].toLowerCase()] : 4;
+  }
+  return streams
+    .map(function (s, i) { return { s: s, i: i, r: r(s) }; })
+    .sort(function (a, b) { return a.r - b.r || a.i - b.i; })
+    .map(function (x) { return x.s; });
+}
 function finish(streams) {
   if (streams.length === 0) return diagnostic(0);
+  streams = hlsFirst(streams);
   if (DEBUG && TRACE.some(function (t) { return t.charAt(0) === "\u2716"; })) return streams.concat(diagnostic(streams.length));
   return streams;
 }
