@@ -1,24 +1,24 @@
 {
-  "name": "danitvs",
-  "version": "3.2",
+  "name": "sko",
+  "version": "3.4",
   "scrapers": [
     {
-      "id": "nuvio-serieskao",
-      "name": "SeriesKao",
-      "description": "Películas y series en español latino desde serieskao.top (~7s)",
-      "version": "3.2",
-      "author": "danitvs",
+      "id": "sko",
+      "name": "Sko",
+      "description": "sko",
+      "version": "3.4",
+      "author": "danis",
       "supportedTypes": [
         "movie",
         "tv"
       ],
-      "filename": "providers/serieskao.js",
+      "filename": "providers/sko.js",
       "enabled": true,
       "formats": [
         "mp4",
         "m3u8"
       ],
-      "logo": "https://www.google.com/s2/favicons?domain=serieskao.top&sz=180",
+      "logo": "",
       "contentLanguage": [
         "es"
       ]
